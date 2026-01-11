@@ -1,10 +1,10 @@
-
 import React, { useState, useEffect, useMemo } from 'react';
 import TransactionForm from './components/TransactionForm';
 import FinancialSummary from './components/FinancialSummary';
 import FinancialCharts from './components/ExpenseCharts';
 import ReportsView from './components/ReportsView';
 import { Transaction, UserProfile } from './types';
+import { apiService } from './services/apiService'; // Импортируем нашего "официанта"
 
 type AppView = 'dashboard' | 'reports';
 
@@ -12,38 +12,55 @@ const App: React.FC = () => {
   const [activeView, setActiveView] = useState<AppView>('dashboard');
   const [searchQuery, setSearchQuery] = useState('');
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
+  const [isLoading, setIsLoading] = useState(true); // Состояние загрузки
   
-  const [profile, setProfile] = useState<UserProfile>(() => {
-    const saved = localStorage.getItem('fintrack_profile');
-    return saved ? JSON.parse(saved) : { name: 'Гость', bio: 'Мой финансовый путь' };
-  });
-
-  const [transactions, setTransactions] = useState<Transaction[]>(() => {
-    const saved = localStorage.getItem('fintrack_pro_v2_transactions');
-    return saved ? JSON.parse(saved) : [];
-  });
-
+  const [profile, setProfile] = useState<UserProfile>({ name: 'Гость', bio: 'Мой финансовый путь' });
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [filter, setFilter] = useState<'all' | 'income' | 'expense'>('all');
 
+  // 1. ЗАГРУЗКА ДАННЫХ ИЗ БАЗЫ ПРИ СТАРТЕ
   useEffect(() => {
-    localStorage.setItem('fintrack_pro_v2_transactions', JSON.stringify(transactions));
-  }, [transactions]);
-
-  useEffect(() => {
-    localStorage.setItem('fintrack_profile', JSON.stringify(profile));
-  }, [profile]);
-
-  const addTransaction = (newTx: Omit<Transaction, 'id'>) => {
-    const transaction: Transaction = {
-      ...newTx,
-      id: Math.random().toString(36).substr(2, 9),
+    const loadData = async () => {
+      try {
+        const data = await apiService.getTransactions();
+        setTransactions(data);
+      } catch (err) {
+        console.error("Ошибка при загрузке данных:", err);
+      } finally {
+        setIsLoading(false);
+      }
     };
-    setTransactions([transaction, ...transactions]);
+    loadData();
+  }, []);
+
+  // 2. ДОБАВЛЕНИЕ (ОТПРАВКА В БАЗУ)
+  const addTransaction = async (newTx: Omit<Transaction, 'id'>) => {
+    const id = Math.random().toString(36).substr(2, 9);
+    const transaction: Transaction = { ...newTx, id };
+
+    try {
+      // Оптимистичное обновление (добавляем в список сразу для скорости)
+      setTransactions([transaction, ...transactions]);
+      // Отправляем на сервер
+      await apiService.addTransaction(transaction);
+    } catch (err) {
+      alert("Не удалось сохранить в базу!");
+      // Если ошибка — возвращаем список как был
+      setTransactions(transactions);
+    }
   };
 
-  const removeTransaction = (id: string) => {
+  // 3. УДАЛЕНИЕ (ИЗ БАЗЫ)
+  const removeTransaction = async (id: string) => {
     if (window.confirm('Удалить эту операцию?')) {
-      setTransactions(transactions.filter(t => t.id !== id));
+      try {
+        const oldTransactions = [...transactions];
+        setTransactions(transactions.filter(t => t.id !== id));
+        await apiService.deleteTransaction(id);
+      } catch (err) {
+        alert("Ошибка при удалении");
+        setTransactions(transactions);
+      }
     }
   };
 
@@ -54,16 +71,19 @@ const App: React.FC = () => {
   const filteredTransactions = useMemo(() => {
     return transactions.filter(t => {
       const matchesFilter = filter === 'all' || t.type === filter;
-      const matchesSearch = t.description.toLowerCase().includes(searchQuery.toLowerCase()) || 
-                           t.category.toLowerCase().includes(searchQuery.toLowerCase());
+      const description = t.description || "";
+      const category = t.category || "";
+      const matchesSearch = description.toLowerCase().includes(searchQuery.toLowerCase()) || 
+                           category.toLowerCase().includes(searchQuery.toLowerCase());
       return matchesFilter && matchesSearch;
     });
   }, [transactions, filter, searchQuery]);
 
-  // Безопасное получение первой буквы для аватара, чтобы избежать ошибки при пустой строке
-  const avatarLetter = (profile.name && profile.name.length > 0) 
-    ? profile.name[0].toUpperCase() 
-    : 'Г';
+  const avatarLetter = (profile.name && profile.name.length > 0) ? profile.name[0].toUpperCase() : 'Г';
+
+  if (isLoading) {
+    return <div className="min-h-screen flex items-center justify-center font-bold text-slate-400">Подключение к базе данных...</div>;
+  }
 
   return (
     <div className="min-h-screen bg-[#F8FAFC] pb-24 selection:bg-indigo-100 selection:text-indigo-700 font-['Inter']">
@@ -76,7 +96,7 @@ const App: React.FC = () => {
             </div>
             <div className="hidden sm:block">
               <h1 className="text-xl font-black text-slate-900 tracking-tight leading-none">FinTrack <span className="text-indigo-600">Pro</span></h1>
-              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">Умное управление деньгами</p>
+              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">Данные в облаке</p>
             </div>
           </div>
           
@@ -101,7 +121,7 @@ const App: React.FC = () => {
           >
              <div className="text-right hidden sm:block">
                 <p className="text-xs font-black text-slate-900 leading-none group-hover:text-indigo-600 transition-colors">{profile.name || 'Гость'}</p>
-                <p className="text-[10px] font-bold text-emerald-500 uppercase tracking-tighter mt-1">Премиум</p>
+                <p className="text-[10px] font-bold text-emerald-500 uppercase tracking-tighter mt-1">Vercel Postgres</p>
              </div>
              <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-indigo-500 to-violet-500 border-2 border-white shadow-md flex items-center justify-center text-white font-bold">
                {avatarLetter}
@@ -113,7 +133,6 @@ const App: React.FC = () => {
       <main className="max-w-6xl mx-auto px-6 py-10">
         {activeView === 'dashboard' ? (
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 animate-in fade-in slide-in-from-left-4 duration-500">
-            {/* Left Column */}
             <div className="lg:col-span-4 space-y-8">
               <section>
                 <h2 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-4 ml-1">Новая операция</h2>
@@ -126,13 +145,12 @@ const App: React.FC = () => {
               </section>
             </div>
 
-            {/* Right Column */}
             <div className="lg:col-span-8 space-y-10">
               <section>
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
                   <div>
                     <h2 className="text-2xl font-black text-slate-900">Активность</h2>
-                    <p className="text-sm text-slate-400 font-medium">Ваши потоки в реальном времени</p>
+                    <p className="text-sm text-slate-400 font-medium">Синхронизировано с базой Neon</p>
                   </div>
                   
                   <div className="flex flex-col sm:flex-row gap-3">
@@ -267,7 +285,7 @@ const App: React.FC = () => {
       )}
 
       <footer className="fixed bottom-0 left-0 right-0 bg-white/50 backdrop-blur-xl border-t border-slate-100 py-4 px-6 flex items-center justify-between">
-        <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">FinTrack Pro &copy; 2025</p>
+        <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">FinTrack Pro &copy; 2026</p>
         <div className="hidden sm:flex items-center gap-4">
           <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" />
           <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Безопасное соединение</span>
