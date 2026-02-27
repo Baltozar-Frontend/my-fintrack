@@ -3,7 +3,7 @@ import { sql } from '@vercel/postgres';
 export default async function handler(req: any, res: any) {
   const { method } = req;
   try {
-    // 1. Создаем таблицу (компактный синтаксис)
+    // 1. Компактное создание таблицы
     await sql`CREATE TABLE IF NOT EXISTS transactions (id TEXT PRIMARY KEY, amount FLOAT, category TEXT, description TEXT, date TEXT, type TEXT);`;
 
     if (method === 'GET') {
@@ -13,7 +13,7 @@ export default async function handler(req: any, res: any) {
 
     if (method === 'POST') {
       const { id, amount, category, description, date, type } = req.body;
-      // 2. Вставляем данные без лишних пробелов в запросе
+      // 2. Вставляем данные максимально плотно, чтобы база не придралась к синтаксису
       await sql`INSERT INTO transactions (id, amount, category, description, date, type) VALUES (${id}, ${amount}, ${category}, ${description}, ${date}, ${type}) ON CONFLICT (id) DO NOTHING;`;
       return res.status(201).json({ message: 'Saved' });
     }
